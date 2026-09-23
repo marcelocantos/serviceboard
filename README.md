@@ -14,6 +14,8 @@ Open [http://127.0.0.1:8767](http://127.0.0.1:8767). Use `--port` to choose anot
 
 The server refuses non-loopback Host headers and requires a per-run token plus a matching Origin for control requests. Do not put it behind a public reverse proxy without adding authentication and a new access-control design.
 
+The service search is focused on load. Use Up and Down to move through visible results. Enter clears a search and keeps the selected service; Escape clears it and restores the selection held before the search. Running services appear before stopped services.
+
 On this Mac, `supervisor/serviceboard.ini` can be installed into `/opt/homebrew/etc/supervisor.d/` and loaded with `supervisorctl reread` followed by `supervisorctl update serviceboard`. Its working directory points at this checkout, and Supervisor restarts the dashboard if it crashes.
 
 ## Service dashboard protocol, version 1
@@ -50,4 +52,4 @@ Supervisor logs come from `supervisorctl tail` and show the latest 32 KiB. If a 
 
 ## Verify
 
-`make bullseye` runs the standing checks. Its live journey starts an isolated Supervisor daemon and Serviceboard on temporary local sockets/ports. It exercises live status, logs, control requests, and the dashboard protocol without touching daily services.
+`make bullseye` runs the standing checks. Its live journeys start isolated Supervisor daemons and Serviceboard on temporary local sockets/ports. They exercise live status, logs, control requests, the dashboard protocol, and keyboard navigation in Chromium without touching daily services. The browser journey uses `uv` to supply Playwright.

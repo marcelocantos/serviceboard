@@ -10,6 +10,8 @@ const state = {
   lastTab: null,
   lastSelected: null,
   refreshing: false,
+  searchActive: false,
+  selectionBeforeSearch: null,
 };
 
 function statusClass(status) {
@@ -18,6 +20,32 @@ function statusClass(status) {
     return "attention";
   if (["fatal", "error", "exited"].includes(status)) return "failed";
   return "stopped";
+}
+
+function statusBucket(status) {
+  const kind = statusClass(status);
+  if (kind === "running") return 0;
+  if (kind === "stopped") return 2;
+  return 1;
+}
+
+function compareServices(left, right) {
+  return (
+    statusBucket(left.status) - statusBucket(right.status) ||
+    left.name.localeCompare(right.name) ||
+    left.source.localeCompare(right.source)
+  );
+}
+
+function visibleServices() {
+  const needle = $("#search").value.trim().toLowerCase();
+  return state.services
+    .filter(
+      (item) =>
+        (state.filter === "all" || state.filter === item.source) &&
+        item.name.toLowerCase().includes(needle),
+    )
+    .sort(compareServices);
 }
 
 function toast(message, error = false) {
@@ -74,33 +102,36 @@ function refreshStats() {
 }
 
 function renderList() {
-  const needle = $("#search").value.trim().toLowerCase();
-  const services = state.services.filter(
-    (item) =>
-      (state.filter === "all" || state.filter === item.source) &&
-      item.name.toLowerCase().includes(needle),
-  );
+  const services = visibleServices();
   $("#list-count").textContent = `(${services.length})`;
   const list = $("#service-list");
   list.replaceChildren();
-  for (const source of ["Supervisor", "Homebrew"]) {
-    const group = services.filter((item) => item.source === source);
+  for (const [bucket, title] of [
+    [0, "RUNNING"],
+    [1, "NEEDS ATTENTION"],
+    [2, "STOPPED"],
+  ]) {
+    const group = services.filter(
+      (item) => statusBucket(item.status) === bucket,
+    );
     if (!group.length) continue;
     const heading = document.createElement("div");
     heading.className = "service-group";
-    heading.textContent = `${source.toUpperCase()}  /  ${group.length}`;
+    heading.textContent = `${title}  /  ${group.length}`;
     list.append(heading);
     for (const item of group) {
       const row = document.createElement("button");
       row.type = "button";
       row.className = `service-item${item.id === state.selected ? " selected" : ""}`;
+      row.dataset.serviceId = item.id;
+      if (item.id === state.selected) row.setAttribute("aria-current", "true");
       row.setAttribute(
         "aria-label",
         `${item.name}, ${item.status}, ${item.source}`,
       );
       const icon = document.createElement("span");
-      icon.className = `service-icon${source === "Homebrew" ? " homebrew" : ""}`;
-      icon.textContent = source === "Homebrew" ? "◇" : "⌘";
+      icon.className = `service-icon${item.source === "Homebrew" ? " homebrew" : ""}`;
+      icon.textContent = item.source === "Homebrew" ? "◇" : "⌘";
       const main = document.createElement("span");
       main.className = "service-main";
       const name = document.createElement("span");
@@ -108,7 +139,7 @@ function renderList() {
       name.textContent = item.name;
       const sub = document.createElement("span");
       sub.className = "service-sub";
-      sub.textContent = item.detail || item.source;
+      sub.textContent = `${item.source}${item.detail ? ` · ${item.detail}` : ""}`;
       main.append(name, sub);
       const label = document.createElement("span");
       label.className = "service-state";
@@ -129,6 +160,13 @@ function renderList() {
     empty.textContent = "NO MATCHING SERVICES";
     list.append(empty);
   }
+}
+
+function scrollSelectedIntoView() {
+  const row = Array.from(document.querySelectorAll(".service-item")).find(
+    (item) => item.dataset.serviceId === state.selected,
+  );
+  row?.scrollIntoView({ block: "nearest" });
 }
 
 function cell(label, value) {
@@ -268,11 +306,33 @@ function renderDetail() {
   if (!keepDashboard) renderTab();
 }
 
-function select(id) {
+function select(id, scroll = false) {
   state.selected = id;
+  if (!state.searchActive) state.selectionBeforeSearch = id;
   state.tab = "overview";
   renderList();
   renderDetail();
+  if (scroll) scrollSelectedIntoView();
+}
+
+function dismissSearch(restorePrevious) {
+  const search = $("#search");
+  if (state.searchActive) {
+    if (
+      restorePrevious &&
+      state.services.some((item) => item.id === state.selectionBeforeSearch)
+    ) {
+      state.selected = state.selectionBeforeSearch;
+      state.tab = "overview";
+      renderDetail();
+    }
+    search.value = "";
+    state.searchActive = false;
+    state.selectionBeforeSearch = state.selected;
+    renderList();
+    scrollSelectedIntoView();
+  }
+  search.blur();
 }
 
 async function refreshServices(quiet = false) {
@@ -287,7 +347,8 @@ async function refreshServices(quiet = false) {
       !state.selected ||
       !state.services.some((item) => item.id === state.selected)
     )
-      state.selected = state.services[0]?.id || null;
+      state.selected = [...state.services].sort(compareServices)[0]?.id || null;
+    if (!state.searchActive) state.selectionBeforeSearch = state.selected;
     renderList();
     renderDetail();
     if (!quiet) toast("Service inventory refreshed");
@@ -326,16 +387,63 @@ async function act(action) {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
+  const search = $("#search");
+  search.focus();
   $("#clock").textContent = new Date().toLocaleTimeString();
   setInterval(() => {
     $("#clock").textContent = new Date().toLocaleTimeString();
   }, 1000);
   $("#refresh").addEventListener("click", () => refreshServices());
-  $("#search").addEventListener("input", renderList);
+  search.addEventListener("input", () => {
+    const active = Boolean(search.value.trim());
+    if (active && !state.searchActive)
+      state.selectionBeforeSearch = state.selected;
+    state.searchActive = active;
+    if (!active) state.selectionBeforeSearch = state.selected;
+    renderList();
+  });
   document.addEventListener("keydown", (event) => {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
       event.preventDefault();
-      $("#search").focus();
+      search.focus();
+      return;
+    }
+    if (event.target === search && event.key === "Enter") {
+      event.preventDefault();
+      dismissSearch(false);
+      return;
+    }
+    if (event.target === search && event.key === "Escape") {
+      event.preventDefault();
+      dismissSearch(true);
+      return;
+    }
+    if (
+      (event.key === "ArrowDown" || event.key === "ArrowUp") &&
+      !event.altKey &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      (event.target === search ||
+        event.target === document.body ||
+        event.target.classList?.contains("service-item"))
+    ) {
+      const services = visibleServices();
+      if (!services.length) return;
+      event.preventDefault();
+      const current = services.findIndex((item) => item.id === state.selected);
+      const next =
+        current < 0
+          ? event.key === "ArrowDown"
+            ? 0
+            : services.length - 1
+          : Math.max(
+              0,
+              Math.min(
+                services.length - 1,
+                current + (event.key === "ArrowDown" ? 1 : -1),
+              ),
+            );
+      select(services[next].id, true);
     }
   });
   for (const filter of document.querySelectorAll(".filter"))
