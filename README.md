@@ -50,4 +50,4 @@ Supervisor logs come from `supervisorctl tail` and show the latest 32 KiB. If a 
 
 ## Verify
 
-`python3 -m unittest discover -s tests -v` starts an isolated Supervisor daemon and Serviceboard on temporary local sockets/ports. It exercises live status, logs, control requests, and the dashboard protocol without touching daily services.
+`make bullseye` runs the standing checks. Its live journey starts an isolated Supervisor daemon and Serviceboard on temporary local sockets/ports. It exercises live status, logs, control requests, and the dashboard protocol without touching daily services.
