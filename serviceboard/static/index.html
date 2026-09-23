@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Serviceboard</title>
+    <link rel="stylesheet" href="/style.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="rail" aria-label="Primary navigation">
+        <div class="brandmark" title="Serviceboard">S<span>●</span></div>
+        <div class="rail-line"></div>
+        <div class="rail-symbol active" title="Services">▦</div>
+        <div class="rail-spacer"></div>
+        <div class="rail-symbol muted" title="Local only">⌂</div>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div class="crumb">
+            YOUR MAC <span>/</span> OPERATIONS <span>/</span> SERVICES
+          </div>
+          <div class="top-right">
+            <span class="live-dot"></span> LOCAL CONNECTION
+            <span class="top-divider">│</span> <span id="clock">—</span>
+          </div>
+        </header>
+
+        <div class="content">
+          <section class="hero">
+            <div>
+              <div class="eyebrow">
+                <span class="eyebrow-line"></span> COMMAND CENTER
+              </div>
+              <h1>Services<span class="heading-period">.</span></h1>
+              <p>
+                One place to watch and manage everything running in the
+                background.
+              </p>
+            </div>
+            <button class="refresh-button" id="refresh" type="button">
+              <span>↻</span> Refresh now
+            </button>
+          </section>
+
+          <section class="stats" aria-label="Service summary">
+            <div class="stat">
+              <span class="stat-label">TOTAL SERVICES</span
+              ><strong id="total-count">—</strong
+              ><span class="stat-footer">Supervisor + Homebrew</span>
+            </div>
+            <div class="stat">
+              <span class="stat-label">RUNNING</span
+              ><strong id="running-count">—</strong
+              ><span class="stat-footer"
+                ><span class="mini-dot green"></span> Active processes</span
+              >
+            </div>
+            <div class="stat">
+              <span class="stat-label">ATTENTION</span
+              ><strong id="attention-count">—</strong
+              ><span class="stat-footer"
+                ><span class="mini-dot amber"></span> Starting or failed</span
+              >
+            </div>
+            <div class="stat stat-system">
+              <span class="stat-label">SYSTEM</span
+              ><strong id="system-state">Checking</strong
+              ><span class="stat-footer" id="system-detail"
+                >Connecting to local services</span
+              >
+            </div>
+          </section>
+
+          <section class="manager">
+            <div class="list-panel">
+              <div class="panel-title-row">
+                <div>
+                  <span class="section-kicker">01 / INVENTORY</span>
+                  <h2>All services <span id="list-count"></span></h2>
+                </div>
+                <span class="auto-refresh">AUTO REFRESH <i></i></span>
+              </div>
+              <div class="search-wrap">
+                <span>⌕</span
+                ><input
+                  id="search"
+                  type="search"
+                  placeholder="Find a service…"
+                  aria-label="Find a service"
+                /><kbd>⌘ K</kbd>
+              </div>
+              <div
+                class="filter-row"
+                role="group"
+                aria-label="Filter by source"
+              >
+                <button class="filter active" data-filter="all" type="button">
+                  All <span id="all-count">0</span>
+                </button>
+                <button class="filter" data-filter="Supervisor" type="button">
+                  Supervisor <span id="supervisor-count">0</span>
+                </button>
+                <button class="filter" data-filter="Homebrew" type="button">
+                  Homebrew <span id="homebrew-count">0</span>
+                </button>
+              </div>
+              <div id="errors" class="source-errors" hidden></div>
+              <div
+                id="service-list"
+                class="service-list"
+                aria-label="Services"
+              ></div>
+            </div>
+
+            <div class="detail-panel" id="detail-panel">
+              <div class="detail-empty" id="detail-empty">
+                <div class="empty-icon">⌁</div>
+                <h2>Select a service</h2>
+                <p>
+                  Choose a service to inspect its status, logs, controls, and
+                  dashboard.
+                </p>
+              </div>
+              <div id="detail-content" hidden>
+                <div class="detail-header">
+                  <span class="section-kicker">02 / SERVICE DETAIL</span>
+                  <div class="detail-heading">
+                    <div>
+                      <div class="source-tag" id="detail-source"></div>
+                      <h2 id="detail-name"></h2>
+                    </div>
+                    <span id="detail-state" class="state-pill"></span>
+                  </div>
+                  <p id="detail-description"></p>
+                </div>
+                <div class="action-row">
+                  <button id="action-start" data-action="start" type="button">
+                    ▶ <span>Start</span></button
+                  ><button id="action-stop" data-action="stop" type="button">
+                    ■ <span>Stop</span></button
+                  ><button
+                    id="action-restart"
+                    data-action="restart"
+                    type="button"
+                  >
+                    ↻ <span>Restart</span>
+                  </button>
+                </div>
+                <div
+                  class="tabs"
+                  role="tablist"
+                  aria-label="Service information"
+                >
+                  <button
+                    class="tab active"
+                    role="tab"
+                    aria-selected="true"
+                    data-tab="overview"
+                  >
+                    Overview</button
+                  ><button
+                    class="tab"
+                    role="tab"
+                    aria-selected="false"
+                    data-tab="stdout"
+                  >
+                    Stdout</button
+                  ><button
+                    class="tab"
+                    role="tab"
+                    aria-selected="false"
+                    data-tab="stderr"
+                  >
+                    Stderr</button
+                  ><button
+                    class="tab"
+                    role="tab"
+                    aria-selected="false"
+                    data-tab="dashboard"
+                  >
+                    Dashboard
+                  </button>
+                </div>
+                <div class="tab-body" id="tab-body"></div>
+                <div class="detail-footer">
+                  <span>LIVE SERVICE DATA</span><span id="updated-at">—</span>
+                </div>
+              </div>
+            </div>
+          </section>
+          <footer class="page-footer">
+            SERVICEBOARD <span>•</span> LOCAL SERVICE CONTROL
+          </footer>
+        </div>
+      </main>
+    </div>
+    <div id="toast" class="toast" role="status" hidden></div>
+  </body>
+</html>
