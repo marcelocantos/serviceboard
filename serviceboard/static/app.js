@@ -399,6 +399,13 @@ document.addEventListener("DOMContentLoaded", async () => {
       state.selectionBeforeSearch = state.selected;
     state.searchActive = active;
     if (!active) state.selectionBeforeSearch = state.selected;
+    if (active) {
+      const first = visibleServices()[0];
+      if (first) {
+        select(first.id, true);
+        return;
+      }
+    }
     renderList();
   });
   document.addEventListener("keydown", (event) => {
