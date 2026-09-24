@@ -10,6 +10,12 @@ const state = {
   lastTab: null,
   lastSelected: null,
   refreshing: false,
+  refreshingSources: new Set(),
+  pendingSources: new Set(),
+  events: null,
+  homebrewTimer: null,
+  supervisorFallbackTimer: null,
+  reconnectTimer: null,
   searchActive: false,
   selectionBeforeSearch: null,
 };
@@ -340,30 +346,138 @@ function dismissSearch(restorePrevious) {
   }
 }
 
-async function refreshServices(quiet = false) {
+function applyInventory(result, source = null) {
+  const nextServices = source
+    ? state.services
+        .filter((item) => item.source !== source)
+        .concat(result.services)
+    : result.services;
+  const nextErrors = source
+    ? { ...state.errors, ...result.errors }
+    : result.errors;
+  if (source && !result.errors[source]) delete nextErrors[source];
+  if (
+    source &&
+    JSON.stringify(state.services.filter((item) => item.source === source)) ===
+      JSON.stringify(result.services) &&
+    state.errors[source] === nextErrors[source]
+  ) {
+    refreshStats();
+    return;
+  }
+  const list = $("#service-list");
+  const scrollTop = list.scrollTop;
+  state.services = nextServices;
+  state.errors = nextErrors;
+  refreshStats();
+  if (
+    !state.selected ||
+    !state.services.some((item) => item.id === state.selected)
+  )
+    state.selected = [...state.services].sort(compareServices)[0]?.id || null;
+  if (!state.searchActive) state.selectionBeforeSearch = state.selected;
+  renderList();
+  list.scrollTop = scrollTop;
+  renderDetail();
+}
+
+async function refreshServices() {
   if (state.refreshing) return;
   state.refreshing = true;
   try {
-    const result = await api("/api/services");
-    state.services = result.services;
-    state.errors = result.errors;
-    refreshStats();
-    if (
-      !state.selected ||
-      !state.services.some((item) => item.id === state.selected)
-    )
-      state.selected = [...state.services].sort(compareServices)[0]?.id || null;
-    if (!state.searchActive) state.selectionBeforeSearch = state.selected;
-    renderList();
-    renderDetail();
-    if (!quiet) toast("Service inventory refreshed");
+    applyInventory(await api("/api/services"));
   } catch (error) {
     $("#system-state").textContent = "Offline";
     $("#system-detail").textContent = error.message;
-    if (!quiet) toast(error.message, true);
   } finally {
     state.refreshing = false;
   }
+}
+
+async function refreshSource(source) {
+  if (state.refreshingSources.has(source)) {
+    state.pendingSources.add(source);
+    return;
+  }
+  state.refreshingSources.add(source);
+  try {
+    applyInventory(await api(`/api/${source.toLowerCase()}`), source);
+  } catch (error) {
+    $("#system-state").textContent = "Offline";
+    $("#system-detail").textContent = error.message;
+  } finally {
+    state.refreshingSources.delete(source);
+    if (
+      state.pendingSources.delete(source) &&
+      document.visibilityState === "visible" &&
+      document.hasFocus()
+    )
+      refreshSource(source);
+  }
+}
+
+function stopLive() {
+  state.events?.close();
+  state.events = null;
+  clearInterval(state.homebrewTimer);
+  clearInterval(state.supervisorFallbackTimer);
+  clearTimeout(state.reconnectTimer);
+  state.homebrewTimer = null;
+  state.supervisorFallbackTimer = null;
+  state.reconnectTimer = null;
+  state.pendingSources.clear();
+}
+
+async function reconnectStream() {
+  state.reconnectTimer = null;
+  if (document.visibilityState !== "visible" || !document.hasFocus()) return;
+  try {
+    state.token = (await api("/api/session")).token;
+    syncLive();
+  } catch {
+    state.reconnectTimer = setTimeout(reconnectStream, 5000);
+  }
+}
+
+function syncLive() {
+  if (
+    !state.token ||
+    document.visibilityState !== "visible" ||
+    !document.hasFocus()
+  ) {
+    stopLive();
+    return;
+  }
+  if (!state.homebrewTimer) {
+    refreshSource("Homebrew");
+    state.homebrewTimer = setInterval(() => refreshSource("Homebrew"), 5000);
+  }
+  if (state.events) return;
+  const events = new EventSource(
+    `/api/events?token=${encodeURIComponent(state.token)}`,
+  );
+  state.events = events;
+  events.addEventListener("ready", () => refreshSource("Supervisor"));
+  events.addEventListener("supervisor", () => refreshSource("Supervisor"));
+  events.onopen = () => {
+    clearInterval(state.supervisorFallbackTimer);
+    state.supervisorFallbackTimer = null;
+  };
+  events.onerror = () => {
+    if (state.events !== events) return;
+    if (!state.supervisorFallbackTimer) {
+      refreshSource("Supervisor");
+      state.supervisorFallbackTimer = setInterval(
+        () => refreshSource("Supervisor"),
+        5000,
+      );
+    }
+    if (events.readyState === EventSource.CLOSED && !state.reconnectTimer) {
+      events.close();
+      state.events = null;
+      state.reconnectTimer = setTimeout(reconnectStream, 5000);
+    }
+  };
 }
 
 async function act(action) {
@@ -382,7 +496,7 @@ async function act(action) {
       body: JSON.stringify({ id: item.id, action }),
     });
     toast(result.output || `${action} requested for ${item.name}`);
-    await refreshServices(true);
+    await refreshSource(item.source);
   } catch (error) {
     toast(error.message, true);
   } finally {
@@ -398,7 +512,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   setInterval(() => {
     $("#clock").textContent = new Date().toLocaleTimeString();
   }, 1000);
-  $("#refresh").addEventListener("click", () => refreshServices());
   search.addEventListener("input", () => {
     const active = Boolean(search.value.trim());
     if (active && !state.searchActive)
@@ -474,8 +587,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     button.addEventListener("click", () => act(button.dataset.action));
   try {
     state.token = (await api("/api/session")).token;
-    await refreshServices(true);
-    setInterval(() => refreshServices(true), 15000);
+    await refreshServices();
+    document.addEventListener("visibilitychange", syncLive);
+    window.addEventListener("focus", syncLive);
+    window.addEventListener("blur", syncLive);
+    window.addEventListener("pagehide", stopLive);
+    syncLive();
   } catch (error) {
     toast(error.message, true);
   }

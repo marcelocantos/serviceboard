@@ -16,7 +16,9 @@ The server refuses non-loopback Host headers and requires a per-run token plus a
 
 The service search is focused on load. Use Up and Down to move through visible results. Enter clears a search and keeps the selected service; Escape clears it and restores the selection held before the search. Running services appear before stopped services.
 
-On this Mac, `supervisor/serviceboard.ini` can be installed into `/opt/homebrew/etc/supervisor.d/` and loaded with `supervisorctl reread` followed by `supervisorctl update serviceboard`. Its working directory points at this checkout, and Supervisor restarts the dashboard if it crashes.
+While the page is visible and focused, Serviceboard listens for Supervisor process-state events and checks Homebrew every five seconds. Switching tabs, minimizing, or moving focus away stops those updates; returning reconnects and refreshes the inventory. If the Supervisor event listener is not installed or cannot connect, the page falls back to five-second Supervisor checks while active. The initial inventory and post-action refreshes always fetch fresh status.
+
+On this Mac, `supervisor/serviceboard.ini` can be installed into `/opt/homebrew/etc/supervisor.d/` and loaded with `supervisorctl reread` followed by `supervisorctl update serviceboard`. It defines both the dashboard and an event listener. The listener starts only while at least one focused page has a live connection. Its working directory points at this checkout, and Supervisor restarts the dashboard if it crashes.
 
 ## Service dashboard protocol, version 1
 

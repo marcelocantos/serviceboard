@@ -17,6 +17,21 @@ from serviceboard.app import Handler, ServiceBoard
 SUBPIXEL_TOLERANCE = 1
 
 
+class TrackingHandler(Handler):
+    requests = []
+    requests_lock = threading.Lock()
+
+    def do_GET(self):
+        with self.requests_lock:
+            self.requests.append(self.path.partition("?")[0])
+        super().do_GET()
+
+    @classmethod
+    def count(cls, path):
+        with cls.requests_lock:
+            return cls.requests.count(path)
+
+
 class KeyboardJourney(unittest.TestCase):
     def test_search_navigation_and_dismissal(self):
         with tempfile.TemporaryDirectory(prefix="serviceboard-keyboard-") as directory:
@@ -46,9 +61,19 @@ serverurl=unix://{root}/supervisor.sock
 command={sys.executable} -u {worker}
 autostart=false
 stdout_logfile=NONE
+[eventlistener:serviceboard-events]
+command={sys.executable} -u -m serviceboard.events --socket {root}/events.sock
+directory={Path(__file__).resolve().parents[1]}
+events=PROCESS_STATE
+autostart=false
+autorestart=true
+startsecs=0
+buffer_size=100
+stderr_logfile={root}/events.log
 """)
             brew = root / "brew"
-            brew.write_text(f"#!{sys.executable}\nimport json\nprint(json.dumps([{{'name': 'brew-sample', 'status': 'none'}}]))\n")
+            brew_reads = root / "brew-reads"
+            brew.write_text(f"#!{sys.executable}\nimport json\nfrom pathlib import Path\nwith Path({str(brew_reads)!r}).open('a') as output: output.write('x')\nprint(json.dumps([{{'name': 'brew-sample', 'status': 'none'}}]))\n")
             brew.chmod(0o755)
             daemon = subprocess.Popen([shutil.which("supervisord"), "-c", str(config)], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
             server = None
@@ -62,17 +87,20 @@ stdout_logfile=NONE
                 else:
                     self.fail(f"Isolated Supervisor did not start: {status.stdout} {status.stderr}")
 
-                Handler.board = ServiceBoard(config, root / "none.json", brew=brew)
-                server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+                Handler.board = ServiceBoard(config, root / "none.json", brew=brew, event_socket=root / "events.sock")
+                TrackingHandler.requests = []
+                server = ThreadingHTTPServer(("127.0.0.1", 0), TrackingHandler)
+                server.daemon_threads = True
                 threading.Thread(target=server.serve_forever, daemon=True).start()
                 with sync_playwright() as playwright:
                     browser = playwright.chromium.launch(headless=True)
                     try:
-                        page = browser.new_page(viewport={"width": 1280, "height": 800})
+                        context = browser.new_context(viewport={"width": 1280, "height": 800})
+                        page = context.new_page()
                         page.goto(f"http://127.0.0.1:{server.server_port}")
                         page.locator('[data-service-id="supervisor:zz-stopped"]').wait_for(state="attached")
                         page.locator('[data-service-id="homebrew:brew-sample"]').wait_for(state="attached")
-                        page.wait_for_load_state("networkidle")
+                        self.assertEqual(page.locator("#refresh").count(), 0)
                         artwork_heights = []
                         # The source artwork bounds are 416/460 and 269/271 of the image heights.
                         for service_id, filename, expected_size, artwork_fraction in (("supervisor:run-00", "supervisor.png", 34 * 0.7, 416 / 460), ("homebrew:brew-sample", "homebrew.svg", 21.7, 269 / 271)):
@@ -136,12 +164,53 @@ stdout_logfile=NONE
                         self.assertEqual(selected.get_attribute("data-service-id"), "supervisor:zz-stopped")
                         page.set_viewport_size({"width": 390, "height": 844})
                         self.assertLessEqual(page.evaluate("document.documentElement.scrollWidth"), 390)
+
+                        deadline = time.monotonic() + 8
+                        while time.monotonic() < deadline and Handler.board.events.clients != 1:
+                            time.sleep(0.1)
+                        self.assertEqual(Handler.board.events.clients, 1)
+                        self.assertTrue(page.evaluate("document.hasFocus() && document.visibilityState === 'visible'"))
+                        active_reads = len(brew_reads.read_text())
+                        active_supervisor_reads = TrackingHandler.count("/api/supervisor")
+                        time.sleep(5.3)
+                        self.assertGreater(len(brew_reads.read_text()), active_reads)
+                        self.assertEqual(TrackingHandler.count("/api/supervisor"), active_supervisor_reads)
+                        subprocess.run([shutil.which("supervisorctl"), "-c", str(config), "stop", "run-00"], check=True, capture_output=True)
+                        page.locator('[data-service-id="supervisor:run-00"] .service-state').filter(has_text="STOPPED").wait_for(timeout=4000)
+
+                        foreground_reads = len(brew_reads.read_text())
+                        page.evaluate("() => { Object.defineProperty(document, 'visibilityState', {configurable: true, value: 'hidden'}); document.dispatchEvent(new Event('visibilitychange')); }")
+                        self.assertEqual(page.evaluate("document.visibilityState"), "hidden")
+                        deadline = time.monotonic() + 8
+                        while time.monotonic() < deadline and Handler.board.events.clients:
+                            time.sleep(0.1)
+                        self.assertEqual(Handler.board.events.clients, 0)
+                        hidden_reads = len(brew_reads.read_text())
+                        time.sleep(5.3)
+                        self.assertEqual(len(brew_reads.read_text()), hidden_reads)
+                        page.evaluate("() => { delete document.visibilityState; document.dispatchEvent(new Event('visibilitychange')); }")
+                        deadline = time.monotonic() + 8
+                        while time.monotonic() < deadline and Handler.board.events.clients != 1:
+                            time.sleep(0.1)
+                        self.assertEqual(Handler.board.events.clients, 1)
+                        self.assertGreater(len(brew_reads.read_text()), foreground_reads)
+                        page.evaluate("() => { Object.defineProperty(document, 'hasFocus', {configurable: true, value: () => false}); window.dispatchEvent(new Event('blur')); }")
+                        deadline = time.monotonic() + 8
+                        while time.monotonic() < deadline and Handler.board.events.clients:
+                            time.sleep(0.1)
+                        self.assertEqual(Handler.board.events.clients, 0)
+                        page.evaluate("() => { delete document.hasFocus; window.dispatchEvent(new Event('focus')); }")
+                        deadline = time.monotonic() + 8
+                        while time.monotonic() < deadline and Handler.board.events.clients != 1:
+                            time.sleep(0.1)
+                        self.assertEqual(Handler.board.events.clients, 1)
                     finally:
                         browser.close()
             finally:
                 if server:
                     server.shutdown()
                     server.server_close()
+                    Handler.board.events.close()
                 if daemon.poll() is None:
                     daemon.terminate()
                     daemon.wait(timeout=5)

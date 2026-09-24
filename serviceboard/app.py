@@ -17,11 +17,15 @@ from pathlib import Path
 from urllib.parse import parse_qs, urljoin, urlparse
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
+from .events import LISTENER_NAME, SupervisorEvents
+
 
 STATUSES = frozenset(
     {"STOPPED", "STARTING", "RUNNING", "BACKOFF", "STOPPING", "EXITED", "FATAL", "UNKNOWN"}
 )
 MAX_LOG_BYTES = 32_000
+HOMEBREW_CACHE_SECONDS = 2
+EVENT_HEARTBEAT_SECONDS = 2
 STATIC = Path(__file__).parent / "static"
 LOGO_CACHE_CONTROL = "public, max-age=86400"
 STATIC_FILES = {
@@ -53,7 +57,7 @@ class NoRedirect(HTTPRedirectHandler):
 
 
 class ServiceBoard:
-    def __init__(self, supervisor_config, registration_file, supervisorctl=None, brew=None):
+    def __init__(self, supervisor_config, registration_file, supervisorctl=None, brew=None, event_socket=None):
         self.supervisor_config = str(supervisor_config)
         self.supervisorctl = supervisorctl or shutil.which("supervisorctl") or (
             "/opt/homebrew/bin/supervisorctl" if Path("/opt/homebrew/bin/supervisorctl").exists() else None
@@ -66,6 +70,7 @@ class ServiceBoard:
         self._brew_lock = threading.Lock()
         self._brew_cache = None
         self._brew_cache_at = 0.0
+        self.events = SupervisorEvents(event_socket, self._supervisor) if event_socket else None
 
     def _supervisor(self, *args):
         if not self.supervisorctl:
@@ -79,7 +84,7 @@ class ServiceBoard:
 
     def _brew_entries(self):
         with self._brew_lock:
-            if self._brew_cache is not None and time.monotonic() - self._brew_cache_at < 10:
+            if self._brew_cache is not None and time.monotonic() - self._brew_cache_at < HOMEBREW_CACHE_SECONDS:
                 return self._brew_cache
             try:
                 entries = json.loads(self._brew("services", "list", "--json"))
@@ -98,6 +103,8 @@ class ServiceBoard:
             if not match or match.group(2) not in STATUSES:
                 raise ServiceError(f"Unrecognized Supervisor status: {line}")
             name, status, detail = match.groups()
+            if self.events is not None and name == LISTENER_NAME:
+                continue
             services.append({"id": f"supervisor:{name}", "name": name, "source": "Supervisor", "status": status.lower(), "detail": detail or ""})
         return services
 
@@ -109,10 +116,12 @@ class ServiceBoard:
             services.append({"id": f"homebrew:{entry['name']}", "name": entry["name"], "source": "Homebrew", "status": str(entry.get("status") or "none").lower(), "detail": str(entry.get("user") or "")})
         return services
 
-    def services(self):
+    def services(self, source_filter=None):
         services = []
         errors = {}
         for source, read in (("Supervisor", self._supervisor_services), ("Homebrew", self._homebrew_services)):
+            if source_filter is not None and source != source_filter:
+                continue
             try:
                 services.extend(read())
             except ServiceError as exc:
@@ -225,11 +234,26 @@ class ServiceBoard:
 
 class Handler(BaseHTTPRequestHandler):
     board: ServiceBoard
+    protocol_version = "HTTP/1.1"
 
-    def _headers(self, status, content_type, length):
+    def handle(self):
+        try:
+            super().handle()
+        except ConnectionResetError:
+            # Browsers can reset an idle keep-alive connection when a tab closes.
+            pass
+
+    def log_request(self, code="-", size="-"):
+        if self.path.startswith("/api/events?"):
+            self.log_message('"GET /api/events HTTP/1.1" %s %s', code, size)
+        else:
+            super().log_request(code, size)
+
+    def _headers(self, status, content_type, length=None):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(length))
+        if length is not None:
+            self.send_header("Content-Length", str(length))
         self.send_header("Cache-Control", LOGO_CACHE_CONTROL if content_type.startswith("image/") else "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; frame-src http://localhost:* http://127.0.0.1:* http://[::1]:*; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
@@ -244,6 +268,37 @@ class Handler(BaseHTTPRequestHandler):
         host = self.headers.get("Host", "")
         return host in {f"127.0.0.1:{self.server.server_port}", f"localhost:{self.server.server_port}"}
 
+    def _event_stream(self, query):
+        token = query.get("token", [""])[0]
+        if not secrets.compare_digest(token, self.board.token):
+            self._json(HTTPStatus.FORBIDDEN, {"error": "Local session required"})
+            return
+        if self.board.events is None:
+            self._json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "Supervisor events are not configured"})
+            return
+        try:
+            version = self.board.events.subscribe()
+        except (OSError, ServiceError) as exc:
+            self._json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": str(exc)})
+            return
+        try:
+            self._headers(HTTPStatus.OK, "text/event-stream; charset=utf-8")
+            self.wfile.write(b"event: ready\ndata: {}\n\n")
+            self.wfile.flush()
+            while not self.board.events.closed:
+                next_version = self.board.events.wait(version, EVENT_HEARTBEAT_SECONDS)
+                if next_version != version:
+                    version = next_version
+                    self.wfile.write(b"event: supervisor\ndata: {}\n\n")
+                else:
+                    self.wfile.write(b": keepalive\n\n")
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, TimeoutError):
+            pass
+        finally:
+            self.close_connection = True
+            self.board.events.unsubscribe()
+
     def do_GET(self):
         if not self._allowed_host():
             self._json(HTTPStatus.FORBIDDEN, {"error": "Local host required"})
@@ -254,6 +309,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(HTTPStatus.OK, {"token": self.board.token})
             elif parsed.path == "/api/services":
                 self._json(HTTPStatus.OK, self.board.services())
+            elif parsed.path == "/api/supervisor":
+                self._json(HTTPStatus.OK, self.board.services("Supervisor"))
+            elif parsed.path == "/api/homebrew":
+                self._json(HTTPStatus.OK, self.board.services("Homebrew"))
+            elif parsed.path == "/api/events":
+                self._event_stream(parse_qs(parsed.query))
             elif parsed.path == "/api/log":
                 query = parse_qs(parsed.query)
                 self._json(HTTPStatus.OK, {"text": self.board.log(query.get("id", [""])[0], query.get("stream", [""])[0])})
@@ -295,10 +356,14 @@ def main():
     parser.add_argument("--port", type=int, default=8767)
     parser.add_argument("--supervisor-config", default="/opt/homebrew/etc/supervisord.conf")
     parser.add_argument("--registrations", default=str(Path.home() / ".config/serviceboard/dashboards.json"))
+    parser.add_argument("--event-socket", default=None)
     args = parser.parse_args()
-    board = ServiceBoard(args.supervisor_config, args.registrations)
+    board = ServiceBoard(args.supervisor_config, args.registrations, event_socket=args.event_socket)
+    if board.events:
+        board.events.reset()
     Handler.board = board
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    server.daemon_threads = True
     print(f"Serviceboard: http://127.0.0.1:{server.server_port}", flush=True)
     try:
         server.serve_forever()
@@ -306,6 +371,8 @@ def main():
         pass
     finally:
         server.server_close()
+        if board.events:
+            board.events.close()
 
 
 if __name__ == "__main__":
