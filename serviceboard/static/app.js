@@ -332,7 +332,6 @@ function dismissSearch(restorePrevious) {
     renderList();
     scrollSelectedIntoView();
   }
-  search.blur();
 }
 
 async function refreshServices(quiet = false) {
