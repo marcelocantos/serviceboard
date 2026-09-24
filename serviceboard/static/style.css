@@ -391,17 +391,19 @@ h1 {
   height: 34px;
   display: grid;
   place-items: center;
-  background: #294038;
-  color: var(--green);
-  border: 1px solid #3a5a47;
   border-radius: 8px;
-  font-size: 15px;
   flex: none;
 }
+.service-icon img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 8px;
+}
 .service-icon.homebrew {
-  background: #38302b;
-  color: #e8bd88;
-  border-color: #56493d;
+  background: #e9e1d3;
+  padding: 2px;
 }
 .service-main {
   min-width: 0;

@@ -14,6 +14,8 @@ from playwright.sync_api import sync_playwright
 
 from serviceboard.app import Handler, ServiceBoard
 
+SUBPIXEL_TOLERANCE = 1
+
 
 class KeyboardJourney(unittest.TestCase):
     def test_search_navigation_and_dismissal(self):
@@ -45,6 +47,9 @@ command={sys.executable} -u {worker}
 autostart=false
 stdout_logfile=NONE
 """)
+            brew = root / "brew"
+            brew.write_text(f"#!{sys.executable}\nimport json\nprint(json.dumps([{{'name': 'brew-sample', 'status': 'none'}}]))\n")
+            brew.chmod(0o755)
             daemon = subprocess.Popen([shutil.which("supervisord"), "-c", str(config)], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
             server = None
             try:
@@ -57,7 +62,7 @@ stdout_logfile=NONE
                 else:
                     self.fail(f"Isolated Supervisor did not start: {status.stdout} {status.stderr}")
 
-                Handler.board = ServiceBoard(config, root / "none.json", brew="/usr/bin/false")
+                Handler.board = ServiceBoard(config, root / "none.json", brew=brew)
                 server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
                 threading.Thread(target=server.serve_forever, daemon=True).start()
                 with sync_playwright() as playwright:
@@ -66,13 +71,19 @@ stdout_logfile=NONE
                         page = browser.new_page(viewport={"width": 1280, "height": 800})
                         page.goto(f"http://127.0.0.1:{server.server_port}")
                         page.locator('[data-service-id="supervisor:zz-stopped"]').wait_for(state="attached")
+                        page.locator('[data-service-id="homebrew:brew-sample"]').wait_for(state="attached")
+                        page.wait_for_load_state("networkidle")
+                        for service_id, filename in (("supervisor:run-00", "supervisor.png"), ("homebrew:brew-sample", "homebrew.svg")):
+                            logo = page.locator(f'[data-service-id="{service_id}"] .service-icon img')
+                            self.assertEqual(logo.get_attribute("src"), f"/assets/{filename}")
+                            self.assertTrue(logo.evaluate("image => image.complete && image.naturalWidth > 0"))
                         search = page.locator("#search")
                         selected = page.locator(".service-item.selected")
 
                         self.assertEqual(page.evaluate("document.activeElement.id"), "search")
                         statuses = page.locator(".service-state").all_text_contents()
                         self.assertEqual(statuses[:12], ["RUNNING"] * 12)
-                        self.assertEqual(statuses[12], "STOPPED")
+                        self.assertEqual(set(statuses[12:]), {"NONE", "STOPPED"})
 
                         search.press("ArrowDown")
                         self.assertEqual(selected.get_attribute("data-service-id"), "supervisor:run-01")
@@ -98,8 +109,9 @@ stdout_logfile=NONE
                         self.assertEqual(search.input_value(), "")
                         self.assertEqual(page.evaluate("document.activeElement.id"), "search")
                         self.assertEqual(selected.get_attribute("data-service-id"), "supervisor:zz-stopped")
-                        self.assertEqual(page.locator(".service-item").count(), 13)
-                        self.assertTrue(selected.evaluate("row => { const a=document.querySelector('#service-list').getBoundingClientRect(), b=row.getBoundingClientRect(); return b.top>=a.top && b.bottom<=a.bottom && b.top>=0 && b.bottom<=innerHeight; }"))
+                        self.assertEqual(page.locator(".service-item").count(), 14)
+                        position = selected.evaluate("row => { const a=document.querySelector('#service-list').getBoundingClientRect(), b=row.getBoundingClientRect(); return {listTop:a.top, listBottom:a.bottom, rowTop:b.top, rowBottom:b.bottom, viewportHeight:innerHeight}; }")
+                        self.assertTrue(position["rowTop"] >= position["listTop"] - SUBPIXEL_TOLERANCE and position["rowBottom"] <= position["listBottom"] + SUBPIXEL_TOLERANCE and position["rowTop"] >= -SUBPIXEL_TOLERANCE and position["rowBottom"] <= position["viewportHeight"] + SUBPIXEL_TOLERANCE, position)
 
                         search.fill("run-03")
                         search.press("ArrowDown")

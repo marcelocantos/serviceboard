@@ -131,7 +131,13 @@ function renderList() {
       );
       const icon = document.createElement("span");
       icon.className = `service-icon${item.source === "Homebrew" ? " homebrew" : ""}`;
-      icon.textContent = item.source === "Homebrew" ? "◇" : "⌘";
+      const logo = document.createElement("img");
+      logo.src =
+        item.source === "Homebrew"
+          ? "/assets/homebrew.svg"
+          : "/assets/supervisor.png";
+      logo.alt = "";
+      icon.append(logo);
       const main = document.createElement("span");
       main.className = "service-main";
       const name = document.createElement("span");

@@ -23,6 +23,14 @@ STATUSES = frozenset(
 )
 MAX_LOG_BYTES = 32_000
 STATIC = Path(__file__).parent / "static"
+LOGO_CACHE_CONTROL = "public, max-age=86400"
+STATIC_FILES = {
+    "/": ("index.html", "text/html; charset=utf-8"),
+    "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+    "/style.css": ("style.css", "text/css; charset=utf-8"),
+    "/assets/supervisor.png": ("assets/supervisor.png", "image/png"),
+    "/assets/homebrew.svg": ("assets/homebrew.svg", "image/svg+xml"),
+}
 
 
 class ServiceError(Exception):
@@ -222,7 +230,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(length))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", LOGO_CACHE_CONTROL if content_type.startswith("image/") else "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; frame-src http://localhost:* http://127.0.0.1:* http://[::1]:*; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
         self.end_headers()
@@ -252,11 +260,10 @@ class Handler(BaseHTTPRequestHandler):
             elif parsed.path == "/api/dashboard":
                 query = parse_qs(parsed.query)
                 self._json(HTTPStatus.OK, {"dashboard": self.board.dashboard(query.get("id", [""])[0])})
-            elif parsed.path in {"/", "/app.js", "/style.css"}:
-                filename = "index.html" if parsed.path == "/" else parsed.path[1:]
+            elif parsed.path in STATIC_FILES:
+                filename, mime = STATIC_FILES[parsed.path]
                 body = (STATIC / filename).read_bytes()
-                mime = {"index.html": "text/html", "app.js": "text/javascript", "style.css": "text/css"}[filename]
-                self._headers(HTTPStatus.OK, f"{mime}; charset=utf-8", len(body))
+                self._headers(HTTPStatus.OK, mime, len(body))
                 self.wfile.write(body)
             else:
                 self._json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
