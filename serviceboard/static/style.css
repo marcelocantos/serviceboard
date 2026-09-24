@@ -391,19 +391,20 @@ h1 {
   height: 34px;
   display: grid;
   place-items: center;
-  border-radius: 8px;
   flex: none;
 }
 .service-icon img {
   display: block;
-  width: 100%;
-  height: 100%;
+  width: 70%;
+  height: 70%;
   object-fit: contain;
-  border-radius: 8px;
+  border-radius: 6px;
 }
-.service-icon.homebrew {
+.service-icon.homebrew img {
+  width: 15px;
+  height: 15px;
   background: #e9e1d3;
-  padding: 2px;
+  border-radius: 3px;
 }
 .service-main {
   min-width: 0;

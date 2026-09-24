@@ -73,10 +73,13 @@ stdout_logfile=NONE
                         page.locator('[data-service-id="supervisor:zz-stopped"]').wait_for(state="attached")
                         page.locator('[data-service-id="homebrew:brew-sample"]').wait_for(state="attached")
                         page.wait_for_load_state("networkidle")
-                        for service_id, filename in (("supervisor:run-00", "supervisor.png"), ("homebrew:brew-sample", "homebrew.svg")):
+                        for service_id, filename, expected_size in (("supervisor:run-00", "supervisor.png", 34 * 0.7), ("homebrew:brew-sample", "homebrew.svg", 30 * 0.5)):
                             logo = page.locator(f'[data-service-id="{service_id}"] .service-icon img')
                             self.assertEqual(logo.get_attribute("src"), f"/assets/{filename}")
                             self.assertTrue(logo.evaluate("image => image.complete && image.naturalWidth > 0"))
+                            bounds = logo.bounding_box()
+                            self.assertAlmostEqual(bounds["width"], expected_size, delta=0.5)
+                            self.assertAlmostEqual(bounds["height"], expected_size, delta=0.5)
                         search = page.locator("#search")
                         selected = page.locator(".service-item.selected")
 
