@@ -80,6 +80,13 @@ stdout_logfile=NONE
                             bounds = logo.bounding_box()
                             self.assertAlmostEqual(bounds["width"], expected_size, delta=0.5)
                             self.assertAlmostEqual(bounds["height"], expected_size, delta=0.5)
+                            box = page.locator(f'[data-service-id="{service_id}"] .service-icon')
+                            box_bounds = box.bounding_box()
+                            self.assertEqual(box_bounds["width"], 34)
+                            self.assertEqual(box_bounds["height"], 34)
+                            self.assertAlmostEqual(bounds["x"] + bounds["width"] / 2, box_bounds["x"] + box_bounds["width"] / 2, delta=0.5)
+                            self.assertAlmostEqual(bounds["y"] + bounds["height"] / 2, box_bounds["y"] + box_bounds["height"] / 2, delta=0.5)
+                            self.assertNotEqual(box.evaluate("element => getComputedStyle(element).backgroundColor"), "rgba(0, 0, 0, 0)")
                         search = page.locator("#search")
                         selected = page.locator(".service-item.selected")
 

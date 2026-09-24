@@ -391,6 +391,8 @@ h1 {
   height: 34px;
   display: grid;
   place-items: center;
+  background: rgb(79 138 87);
+  border-radius: 8px;
   flex: none;
 }
 .service-icon img {
@@ -398,13 +400,13 @@ h1 {
   width: 70%;
   height: 70%;
   object-fit: contain;
-  border-radius: 6px;
+}
+.service-icon.homebrew {
+  background: #e9e1d3;
 }
 .service-icon.homebrew img {
   width: 15px;
   height: 15px;
-  background: #e9e1d3;
-  border-radius: 3px;
 }
 .service-main {
   min-width: 0;
