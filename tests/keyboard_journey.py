@@ -73,13 +73,16 @@ stdout_logfile=NONE
                         page.locator('[data-service-id="supervisor:zz-stopped"]').wait_for(state="attached")
                         page.locator('[data-service-id="homebrew:brew-sample"]').wait_for(state="attached")
                         page.wait_for_load_state("networkidle")
-                        for service_id, filename, expected_size in (("supervisor:run-00", "supervisor.png", 34 * 0.7), ("homebrew:brew-sample", "homebrew.svg", 30 * 0.5)):
+                        artwork_heights = []
+                        # The source artwork bounds are 416/460 and 269/271 of the image heights.
+                        for service_id, filename, expected_size, artwork_fraction in (("supervisor:run-00", "supervisor.png", 34 * 0.7, 416 / 460), ("homebrew:brew-sample", "homebrew.svg", 21.7, 269 / 271)):
                             logo = page.locator(f'[data-service-id="{service_id}"] .service-icon img')
                             self.assertEqual(logo.get_attribute("src"), f"/assets/{filename}")
                             self.assertTrue(logo.evaluate("image => image.complete && image.naturalWidth > 0"))
                             bounds = logo.bounding_box()
                             self.assertAlmostEqual(bounds["width"], expected_size, delta=0.5)
                             self.assertAlmostEqual(bounds["height"], expected_size, delta=0.5)
+                            artwork_heights.append(bounds["height"] * artwork_fraction)
                             box = page.locator(f'[data-service-id="{service_id}"] .service-icon')
                             box_bounds = box.bounding_box()
                             self.assertEqual(box_bounds["width"], 34)
@@ -87,6 +90,7 @@ stdout_logfile=NONE
                             self.assertAlmostEqual(bounds["x"] + bounds["width"] / 2, box_bounds["x"] + box_bounds["width"] / 2, delta=0.5)
                             self.assertAlmostEqual(bounds["y"] + bounds["height"] / 2, box_bounds["y"] + box_bounds["height"] / 2, delta=0.5)
                             self.assertNotEqual(box.evaluate("element => getComputedStyle(element).backgroundColor"), "rgba(0, 0, 0, 0)")
+                        self.assertAlmostEqual(artwork_heights[0], artwork_heights[1], delta=0.5)
                         search = page.locator("#search")
                         selected = page.locator(".service-item.selected")
 
