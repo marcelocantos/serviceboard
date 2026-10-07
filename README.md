@@ -18,7 +18,7 @@ The service search is focused on load. Use Up and Down to move through visible r
 
 While the page is visible and focused, Serviceboard listens for Supervisor process-state events and checks Homebrew every five seconds. Switching tabs, minimizing, or moving focus away stops those updates; returning reconnects and refreshes the inventory. If the Supervisor event listener is not installed or cannot connect, the page falls back to five-second Supervisor checks while active. The initial inventory and post-action refreshes always fetch fresh status.
 
-On this Mac, `supervisor/serviceboard.ini` can be installed into `/opt/homebrew/etc/supervisor.d/` and loaded with `supervisorctl reread` followed by `supervisorctl update serviceboard`. It defines both the dashboard and an event listener. The listener starts only while at least one focused page has a live connection. Its working directory points at this checkout, and Supervisor restarts the dashboard if it crashes.
+`supervisor/serviceboard.ini` is a sample program and event listener for this checkout. Leave the file in the repository and add its path to Supervisor's include list. Supervisor expands `%(here)s` to the `supervisor/` directory, and `directory=%(here)s/..` is the checkout. The commands use `%(ENV_HOME)s/.py/bin/python3`; change `command` if Python lives elsewhere. On this Mac, Homebrew's include directory is `/opt/homebrew/etc/supervisor.d/`; after the include path is in place, load the program with `supervisorctl reread` followed by `supervisorctl update serviceboard`. The listener starts only while at least one focused page has a live connection, and Supervisor restarts the dashboard if it crashes.
 
 ## Service dashboard protocol, version 1
 
