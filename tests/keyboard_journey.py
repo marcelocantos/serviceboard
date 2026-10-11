@@ -17,6 +17,34 @@ from serviceboard.app import Handler, ServiceBoard
 SUBPIXEL_TOLERANCE = 1
 
 
+def panel_geometry(page):
+    return page.evaluate("""() => {
+        const box = (selector) => {
+            const rect = document.querySelector(selector).getBoundingClientRect();
+            return {height: rect.height, top: rect.top, bottom: rect.bottom};
+        };
+        return {
+            list: box('.list-panel'),
+            detail: box('.detail-panel'),
+            services: box('#service-list'),
+            detailFooter: box('.detail-footer'),
+            footer: box('.page-footer'),
+            viewportHeight: innerHeight,
+            scrollHeight: document.documentElement.scrollHeight,
+        };
+    }""")
+
+
+def assert_desktop_panels_fill_page(test, geometry, *, detail_content_fits):
+    test.assertAlmostEqual(geometry["list"]["height"], geometry["detail"]["height"], delta=SUBPIXEL_TOLERANCE, msg=geometry)
+    test.assertAlmostEqual(geometry["list"]["bottom"], geometry["footer"]["top"], delta=SUBPIXEL_TOLERANCE, msg=geometry)
+    test.assertAlmostEqual(geometry["detail"]["bottom"], geometry["footer"]["top"], delta=SUBPIXEL_TOLERANCE, msg=geometry)
+    test.assertAlmostEqual(geometry["services"]["bottom"], geometry["list"]["bottom"], delta=2, msg=geometry)
+    if detail_content_fits:
+        test.assertAlmostEqual(geometry["detailFooter"]["bottom"], geometry["detail"]["bottom"], delta=2, msg=geometry)
+    test.assertLessEqual(geometry["scrollHeight"], geometry["viewportHeight"] + SUBPIXEL_TOLERANCE, geometry)
+
+
 class TrackingHandler(Handler):
     requests = []
     requests_lock = threading.Lock()
@@ -162,8 +190,20 @@ stderr_logfile={root}/events.log
                         self.assertEqual(search.input_value(), "")
                         self.assertEqual(page.evaluate("document.activeElement.id"), "search")
                         self.assertEqual(selected.get_attribute("data-service-id"), "supervisor:zz-stopped")
+                        short = panel_geometry(page)
+                        assert_desktop_panels_fill_page(self, short, detail_content_fits=False)
+                        page.set_viewport_size({"width": 1280, "height": 1100})
+                        tall = panel_geometry(page)
+                        assert_desktop_panels_fill_page(self, tall, detail_content_fits=True)
+                        self.assertAlmostEqual(tall["list"]["height"] - short["list"]["height"], 300, delta=SUBPIXEL_TOLERANCE)
+                        self.assertAlmostEqual(tall["detail"]["height"] - short["detail"]["height"], 300, delta=SUBPIXEL_TOLERANCE)
                         page.set_viewport_size({"width": 390, "height": 844})
                         self.assertLessEqual(page.evaluate("document.documentElement.scrollWidth"), 390)
+                        mobile = panel_geometry(page)
+                        self.assertAlmostEqual(mobile["list"]["height"], mobile["viewportHeight"], delta=SUBPIXEL_TOLERANCE)
+                        self.assertAlmostEqual(mobile["detail"]["height"], mobile["viewportHeight"], delta=SUBPIXEL_TOLERANCE)
+                        self.assertAlmostEqual(mobile["services"]["bottom"], mobile["list"]["bottom"], delta=2)
+                        self.assertAlmostEqual(mobile["detailFooter"]["bottom"], mobile["detail"]["bottom"], delta=2)
 
                         deadline = time.monotonic() + 8
                         while time.monotonic() < deadline and Handler.board.events.clients != 1:
