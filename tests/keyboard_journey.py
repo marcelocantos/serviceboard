@@ -35,6 +35,59 @@ def panel_geometry(page):
     }""")
 
 
+def assert_inventory_page_scroll(test, page, key, direction):
+    selected = page.locator(".service-item.selected").get_attribute("data-service-id")
+    page.evaluate("""() => {
+        const list = document.querySelector('#service-list');
+        const capture = {
+            startTop: list.scrollTop,
+            pageSize: list.clientHeight,
+            maxScroll: Math.max(0, list.scrollHeight - list.clientHeight),
+            keyAt: 0,
+            samples: [],
+        };
+        window.__inventoryScroll = capture;
+        const stamp = (event) => {
+            if (event.key !== 'PageUp' && event.key !== 'PageDown') return;
+            capture.keyAt = performance.now();
+            document.removeEventListener('keydown', stamp, true);
+        };
+        document.addEventListener('keydown', stamp, true);
+        const tick = (now) => {
+            if (!capture.keyAt) {
+                requestAnimationFrame(tick);
+                return;
+            }
+            capture.samples.push({elapsed: now - capture.keyAt, top: list.scrollTop});
+            if (now - capture.keyAt < 320) requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+    }""")
+    page.locator("#search").press(key)
+    capture = page.evaluate("""() => new Promise((resolve) => {
+        const finish = () => {
+            const capture = window.__inventoryScroll;
+            const last = capture.samples.at(-1);
+            if (last && last.elapsed >= 300) resolve(capture);
+            else requestAnimationFrame(finish);
+        };
+        requestAnimationFrame(finish);
+    })""")
+    distance = direction * capture["pageSize"]
+    target = min(capture["maxScroll"], max(0, capture["startTop"] + distance))
+    test.assertGreater(abs(target - capture["startTop"]), capture["pageSize"] - 1)
+    early = min(capture["samples"], key=lambda sample: abs(sample["elapsed"] - 16))
+    early_progress = (early["top"] - capture["startTop"]) / (target - capture["startTop"])
+    test.assertLess(early_progress, 0.55, early)
+    midpoint = min(capture["samples"], key=lambda sample: abs(sample["elapsed"] - 100))
+    midpoint_progress = (midpoint["top"] - capture["startTop"]) / (target - capture["startTop"])
+    test.assertGreater(midpoint_progress, 0.75, midpoint)
+    test.assertLess(midpoint_progress, 0.96, midpoint)
+    settled = min(capture["samples"], key=lambda sample: abs(sample["elapsed"] - 250))
+    test.assertAlmostEqual(settled["top"], target, delta=1.5, msg=settled)
+    test.assertEqual(page.locator(".service-item.selected").get_attribute("data-service-id"), selected)
+
+
 def assert_desktop_panels_fill_page(test, geometry, *, detail_content_fits):
     test.assertAlmostEqual(geometry["list"]["height"], geometry["detail"]["height"], delta=SUBPIXEL_TOLERANCE, msg=geometry)
     test.assertAlmostEqual(geometry["list"]["bottom"], geometry["footer"]["top"], delta=SUBPIXEL_TOLERANCE, msg=geometry)
@@ -182,6 +235,8 @@ stderr_logfile={root}/events.log
                         self.assertEqual(page.locator(".service-item").count(), 14)
                         position = selected.evaluate("row => { const a=document.querySelector('#service-list').getBoundingClientRect(), b=row.getBoundingClientRect(); return {listTop:a.top, listBottom:a.bottom, rowTop:b.top, rowBottom:b.bottom, viewportHeight:innerHeight}; }")
                         self.assertTrue(position["rowTop"] >= position["listTop"] - SUBPIXEL_TOLERANCE and position["rowBottom"] <= position["listBottom"] + SUBPIXEL_TOLERANCE and position["rowTop"] >= -SUBPIXEL_TOLERANCE and position["rowBottom"] <= position["viewportHeight"] + SUBPIXEL_TOLERANCE, position)
+                        assert_inventory_page_scroll(self, page, "PageUp", -1)
+                        assert_inventory_page_scroll(self, page, "PageDown", 1)
 
                         search.fill("run-03")
                         search.press("ArrowDown")

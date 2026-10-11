@@ -14,7 +14,7 @@ Open [http://127.0.0.1:8767](http://127.0.0.1:8767). Use `--port` to choose anot
 
 The server refuses non-loopback Host headers and requires a per-run token plus a matching Origin for control requests. Do not put it behind a public reverse proxy without adding authentication and a new access-control design.
 
-The service search is focused on load. Use Up and Down to move through visible results. Enter clears a search and keeps the selected service; Escape clears it and restores the selection held before the search. Running services appear before stopped services.
+The service search is focused on load. Use Up and Down to move through visible results. Page Up and Page Down scroll the inventory. Enter clears a search and keeps the selected service; Escape clears it and restores the selection held before the search. Running services appear before stopped services.
 
 While the page is visible and focused, Serviceboard listens for Supervisor process-state events and checks Homebrew every five seconds. Switching tabs, minimizing, or moving focus away stops those updates; returning reconnects and refreshes the inventory. If the Supervisor event listener is not installed or cannot connect, the page falls back to five-second Supervisor checks while active. The initial inventory and post-action refreshes always fetch fresh status.
 

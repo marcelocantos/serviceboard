@@ -108,6 +108,7 @@ function refreshStats() {
 }
 
 function renderList() {
+  cancelInventoryScroll();
   const services = visibleServices();
   $("#list-count").textContent = `(${services.length})`;
   const list = $("#service-list");
@@ -179,6 +180,51 @@ function scrollSelectedIntoView() {
     (item) => item.dataset.serviceId === state.selected,
   );
   row?.scrollIntoView({ block: "nearest" });
+}
+
+const INVENTORY_PAGE_SCROLL_MS = 200;
+let inventoryScrollGeneration = 0;
+let inventoryScrollTarget = null;
+
+function rapidEase(progress) {
+  return 1 - (1 - progress) ** 3;
+}
+
+function cancelInventoryScroll() {
+  inventoryScrollGeneration += 1;
+  inventoryScrollTarget = null;
+}
+
+function scrollInventoryByPage(direction) {
+  const list = $("#service-list");
+  const maxScroll = Math.max(0, list.scrollHeight - list.clientHeight);
+  const base = inventoryScrollTarget ?? list.scrollTop;
+  const target = Math.min(
+    maxScroll,
+    Math.max(0, base + direction * list.clientHeight),
+  );
+  const generation = ++inventoryScrollGeneration;
+  const start = list.scrollTop;
+  const distance = target - start;
+  inventoryScrollTarget = target;
+  if (
+    distance === 0 ||
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  ) {
+    list.scrollTop = target;
+    if (generation === inventoryScrollGeneration) inventoryScrollTarget = null;
+    return;
+  }
+  const started = performance.now();
+  const step = (now) => {
+    if (generation !== inventoryScrollGeneration) return;
+    const progress = Math.min(1, (now - started) / INVENTORY_PAGE_SCROLL_MS);
+    list.scrollTop = start + distance * rapidEase(progress);
+    if (progress < 1) requestAnimationFrame(step);
+    else if (generation === inventoryScrollGeneration)
+      inventoryScrollTarget = null;
+  };
+  requestAnimationFrame(step);
 }
 
 function cell(label, value) {
@@ -541,6 +587,19 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (event.target === search && event.key === "Escape") {
       event.preventDefault();
       dismissSearch(true);
+      return;
+    }
+    if (
+      (event.key === "PageDown" || event.key === "PageUp") &&
+      !event.altKey &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !(event.target instanceof HTMLTextAreaElement) &&
+      !(event.target instanceof HTMLSelectElement) &&
+      !(event.target instanceof HTMLInputElement && event.target !== search)
+    ) {
+      event.preventDefault();
+      scrollInventoryByPage(event.key === "PageDown" ? 1 : -1);
       return;
     }
     if (
