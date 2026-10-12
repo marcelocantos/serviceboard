@@ -10,11 +10,11 @@ Requires Python 3.11+, `supervisorctl`, and `brew` on the host. No Python packag
 python3 -m serviceboard
 ```
 
-Open [http://127.0.0.1:8767](http://127.0.0.1:8767). Use `--port` to choose another local port, `--supervisor-config` for a different Supervisor config, and `--registrations` for a different dashboard registration file. Supervisor and Homebrew actions run as the user who started Serviceboard. The Supervisor connection uses the local `supervisorctl` configuration; Serviceboard does not store its credentials.
+Open [http://127.0.0.1:8767](http://127.0.0.1:8767). Use `--port` to choose another local port, `--supervisor-config` for a different Supervisor config, `--registrations` for a different dashboard registration file, and `--event-socket` to receive Supervisor process events. Supervisor and Homebrew actions run as the user who started Serviceboard. The Supervisor connection uses the local `supervisorctl` configuration; Serviceboard does not store its credentials.
 
 The server refuses non-loopback Host headers and requires a per-run token plus a matching Origin for control requests. Do not put it behind a public reverse proxy without adding authentication and a new access-control design.
 
-The service search is focused on load. Use Up and Down to move through visible results. Page Up and Page Down scroll the inventory. Enter clears a search and keeps the selected service; Escape clears it and restores the selection held before the search. Running services appear before stopped services.
+The service search is focused on load. Use Up and Down to move through visible results. Page Up and Page Down scroll the inventory. Enter clears a search and keeps the selected service; Escape clears it and restores the selection held before the search. Running services appear before stopped services. The inventory and service detail panels fill the height of the page, and their contents scroll inside the panels.
 
 While the page is visible and focused, Serviceboard listens for Supervisor process-state events and checks Homebrew every five seconds. Switching tabs, minimizing, or moving focus away stops those updates; returning reconnects and refreshes the inventory. If the Supervisor event listener is not installed or cannot connect, the page falls back to five-second Supervisor checks while active. The initial inventory and post-action refreshes always fetch fresh status.
 
@@ -50,8 +50,16 @@ Views must be paths on the registered origin. Serviceboard shows each view in a 
 
 ## Logs
 
-Supervisor logs come from `supervisorctl tail` and show the latest 32 KiB. If a program sets `redirect_stderr=true`, its stderr appears in stdout. Homebrew logs are available when its service plist declares `StandardOutPath` or `StandardErrorPath`; otherwise the tab explains why no stream is available.
+Supervisor logs come from `supervisorctl tail` and show the latest 32,000 bytes. If a program sets `redirect_stderr=true`, its stderr appears in stdout. Homebrew logs are available when its service plist declares `StandardOutPath` or `StandardErrorPath`; otherwise the tab explains why no stream is available.
 
 ## Verify
 
 `make bullseye` runs the standing checks. Its live journeys start isolated Supervisor daemons and Serviceboard on temporary local sockets/ports. They exercise live status, logs, control requests, the dashboard protocol, and keyboard navigation in Chromium without touching daily services. The browser journey uses `uv` to supply Playwright.
+
+## Licence
+
+Apache 2.0. See [LICENSE](LICENSE). Third-party marks are attributed in [NOTICE](NOTICE).
+
+## Agents
+
+If you use an agentic coding tool, include [`agents-guide.md`](agents-guide.md) in your project context.
